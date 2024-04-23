@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
 
-from flask import Flask, make_response, jsonify, request, session,abort
-
+from flask import Flask, make_response, jsonify, request, session
 from flask_migrate import Migrate
 from flask_restful import Api, Resource
-from flask.views import MethodView
-from flask_login import current_user, login_required, LoginManager ,UserMixin  
 
 from models import db, Article, User
 
@@ -14,7 +11,6 @@ app.secret_key = b'Y\xf1Xz\x00\xad|eQ\x80t \xca\x1a\x10K'
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///app.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.json.compact = False
-login_manager = LoginManager(app)
 
 migrate = Migrate(app, db)
 
@@ -22,9 +18,19 @@ db.init_app(app)
 
 api = Api(app)
 
-@login_manager.user_loader
-def load_user(user_id):
-    return User.query.get(int(user_id))
+@app.before_request
+def check_if_logged_in():
+    open_access_list = [
+        'clear',
+        'article_list',
+        'show_article',
+        'login',
+        'logout',
+        'check_session'
+    ]
+
+    if (request.endpoint) not in open_access_list and (not session.get('user_id')):
+        return {'error': '401 Unauthorized'}, 401
 
 class ClearSession(Resource):
 
@@ -92,26 +98,20 @@ class CheckSession(Resource):
         
         return {}, 401
 
-class MemberOnlyIndex(MethodView):
+class MemberOnlyIndex(Resource):
+    
     def get(self):
-        if not current_user.is_authenticated:
-            return jsonify({"error": "Unauthorized"}), 401
+        member_only_articles = Article.query.filter(Article.is_member_only==True).all()
         
-        articles = Article.query.filter_by(is_member_only=True).all()
-        if not articles:
-            return jsonify({"message": "No member-only articles available"}), 200
-        articles_data = [article.serialize() for article in articles]
-        return jsonify(articles_data), 200
+        articles_data = [article.to_dict() for article in member_only_articles]
+        return articles_data, 200
 
-class MemberOnlyArticle(MethodView):
+class MemberOnlyArticle(Resource):
+    
     def get(self, id):
-        if not current_user.is_authenticated:
-            return jsonify({"error": "Unauthorized"}), 401
-        
-        article = Article.query.filter_by(id=id, is_member_only=True).first()
-        if not article:
-            return jsonify({"error": "Article not found"}), 404
-        return jsonify(article.serialize()), 200
+        article = Article.query.filter(Article.id == id).first()
+
+        return article.to_dict(), 200
 
 api.add_resource(ClearSession, '/clear', endpoint='clear')
 api.add_resource(IndexArticle, '/articles', endpoint='article_list')
